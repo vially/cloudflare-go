@@ -68,6 +68,22 @@ type WorkerScriptResponse struct {
 	WorkerScript `json:"result"`
 }
 
+// WorkerResource represents a resource that can bind to a WorkerScript.
+//
+// API reference: https://api.cloudflare.com/#worker-binding-properties
+type WorkerResource struct {
+	Type          string `json:"type"`
+	Name          string `json:"name"`
+	KVNamespaceID string `json:"namespace_id,omitempty"`
+	WasmPart      string `json:"part,omitempty"`
+}
+
+// WorkerResourceListResponse is a response when listing WorkerResources of a WorkerScript.
+type WorkerResourceListResponse struct {
+	Response
+	Result []WorkerResource `json:"result"`
+}
+
 // WorkerResourceBindings defines lists of resources to bind to a worker script using the Resource Binding API
 //
 // API reference: https://developers.cloudflare.com/workers/api/resource-bindings/
@@ -479,4 +495,50 @@ func (api *API) UpdateWorkerRoute(zoneID string, routeID string, route WorkerRou
 		return WorkerRouteResponse{}, errors.Wrap(err, errUnmarshalError)
 	}
 	return r, nil
+}
+
+// ListWorkerBindings gets the list of WorkerResources bound to the WorkerScript.
+//
+// If your account has multiple scripts, you must specify an OrganizationID:
+// https://godoc.org/github.com/cloudflare/cloudflare-go#UsingOrganization
+//
+// API reference: https://api.cloudflare.com/#worker-binding-list-bindings
+func (api *API) ListWorkerBindings(requestParams *WorkerRequestParams) (WorkerResourceListResponse, error) {
+	uri, err := api.uriOfWorkerScript(requestParams)
+	var r WorkerResourceListResponse
+	if err != nil {
+		return r, err
+	}
+	headers := make(http.Header)
+	headers.Set("Content-Type", "application/javascript")
+	res, err := api.makeRequestWithHeaders("GET", uri+"/bindings", nil, headers)
+	if err != nil {
+		return r, errors.Wrap(err, errMakeRequestError)
+	}
+	err = json.Unmarshal(res, &r)
+	if err != nil {
+		return r, errors.Wrap(err, errUnmarshalError)
+	}
+	return r, nil
+}
+
+// uriOfWorkerHelper is a helper that determines the API endpoints.
+func (api *API) uriOfWorkerHelper(requestParams *WorkerRequestParams, singletonScript, multiScript string) (string, error) {
+	if requestParams.ScriptName == "" {
+		if requestParams.ZoneID == "" {
+			return "", errors.New("zone or organization ID required for request")
+		}
+		return singletonScript, nil
+	}
+	if api.OrganizationID == "" {
+		return "", errors.New("organization ID required for enterprise only request")
+	}
+	return multiScript, nil
+}
+
+// uriOfWorkerScript is a helper that determines the API endpoint for WorkerScript.
+func (api *API) uriOfWorkerScript(requestParams *WorkerRequestParams) (string, error) {
+	return api.uriOfWorkerHelper(requestParams,
+		"/zones/"+requestParams.ZoneID+"/workers/script",
+		"/accounts/"+api.OrganizationID+"/workers/scripts/"+requestParams.ScriptName)
 }
